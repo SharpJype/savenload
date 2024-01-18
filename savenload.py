@@ -5,13 +5,51 @@ from io import FileIO
 from base64 import encodebytes as bs64enc
 from base64 import decodebytes as bs64dec
 
+# usage for basic python datatypes and numpy arrays:
+#   to/from string:
+#       packup(obj) -> string
+#       unpack(string) -> obj
+#   to/from files:
+#       pcksave(path, obj) -> boolean
+#       pckload(path) -> obj
+#
+#   also if a child object is a reference to another object, the reference remade when unpacking/loading
+#
+#   EXAMPLE:
+#       d = {}
+#       l = [d]
+#       d["a"] = l
+#       pcksave(path, d)
+#       pckload(path)
+
+
+# usage of savenload class:
+#   EXAMPLE:
+#       import savenload
+#
+#       class savenload(savenload.savenload):
+#           load_env = __name__
+#           def class_load(self, c): return eval(c)
+#
+#       class myclass(savenload.savenload):
+#           pass
+#
+#   also if a child object is a reference to another object, the reference remade when unpacking/loading
+#   
+#   loading breaks when there is a custom class inside basic python objects -> classes stay as dictionaries
+#       myclass -> dict/list/tuple/... -> anotherclass
+#
+#   instead keep class structure continuous:
+#       myclass -> anotherclass -> anotheranotherclass -> ...
+#   
+#   to/from files:
+#       x = myclass()
+#       x.save(path)
+#       x.load(path)
 
 
 
-
-
-# OSPCK
-def explode(path):
+def explode(path): # returns list of dirnames, filename/dirname, extension 
     path = os.path.normpath(path.replace("/", "\\"))
     if ":" in path: location, directories = path.split("\\", 1)
     elif r"\\" in path:
@@ -34,7 +72,6 @@ def explode(path):
     return directories, None, None
 def implode(dirs, name=None, ext=None): return ("\\".join(dirs) if dirs else ".")+str("\\"+name+str("."+ext if ext else "") if name else "")
     
-
 def makedirs(path, **kwargs):
     dirs, name, ext = explode(path)
     os.makedirs(implode(dirs, name if ext==None else None), **kwargs)
@@ -51,10 +88,7 @@ def is_iterable(x): return type(x) in [tuple,set,list,np.ndarray]
 def is_mutable(x): return type(x) in [list,np.ndarray,dict]
 def is_hashable(x): return not is_mutable(x)
 
-
-def reverse_dict(d): return {v:k for k,v in d.items()}
-
-openers = { # valid datatypes to save as is
+openers = {
     bytes: "b",int: "i",
     float: "f",str: "s",
     tuple: "t",list: "l",
@@ -69,8 +103,8 @@ openers = { # valid datatypes to save as is
     np.float64: "f",
     type: "y",
     }
-# custom classes are datascraped for .load/.save functions and saved as dicts
-# lists, dicts, numpy arrays and custom classes can be references in higher classes, so 
+
+def reverse_dict(d): return {v:k for k,v in d.items()}
 reverse_openers = reverse_dict(openers)
 
 
@@ -84,12 +118,12 @@ def datascrape(obj):
     try: return {k:datascrape(v) for k,v in obj.__dict__.items()}
     except: return None
 
-def packup(d, depth=0, datascrape=False, id_references=None, separator=":", depth_ceiling=None, **kwargs):
-    if id_references==None: id_references = []
+def packup(d, depth=0, datascrape=False, id_refs=None, separator=":", depth_ceiling=None, **kwargs):
+    if id_refs==None: id_refs = []
     def prefix(depth, t):
         x = openers.get(t, t)
         return x if depth else "0:"+x # str(depth).zfill(dc)+openers.get(t, t)
-    def save_ref(x): id_references.append(id(x)) # save a reference point
+    def save_ref(x): id_refs.append(id(x)) # save a reference
     def typestring(o): return str(type(o))[8:-2]
     def iterablepackup(i, depth, **kwargs):
         if len(i):
@@ -107,20 +141,20 @@ def packup(d, depth=0, datascrape=False, id_references=None, separator=":", dept
     if depth==depth_ceiling:
         dt = None
         ds = ""
-    elif id(d) in id_references:
+    elif id(d) in id_refs:
         dt = "r"
         ds = str(id(d))
     else:
-        kwargs = {"datascrape":datascrape, "id_references":id_references, "separator":":", "depth_ceiling":depth_ceiling}
+        kwargs = {"datascrape":datascrape, "id_refs":id_refs, "separator":":", "depth_ceiling":depth_ceiling}
         if dt==dict:
             save_ref(d)
-            ds = dictpackup(d, depth, **kwargs)
+            ds = f"{id(d)} "+dictpackup(d, depth, **kwargs)
         elif is_array(d):
             save_ref(d)
-            ds = str(bs64enc(array2bytes(d)).hex())
+            ds = f"{id(d)} "+str(bs64enc(array2bytes(d)).hex())
         elif is_iterable(d):
             save_ref(d)
-            ds = iterablepackup(d, depth, **kwargs)
+            ds = f"{id(d)} "+iterablepackup(d, depth, **kwargs)
         elif openers.get(dt, "n") in "fis":
             ds = str(d)
             if separator in ds: # encode and give special type
@@ -128,13 +162,13 @@ def packup(d, depth=0, datascrape=False, id_references=None, separator=":", dept
                 ds = str(bs64enc(ds.encode("utf8")).hex())
         elif dt==bytes:
             save_ref(d)
-            ds = str(bs64enc(d).hex())
+            ds = f"{id(d)} "+str(bs64enc(d).hex())
         elif dt==bool: ds = "1" if d else "0"
         elif dt==type: ds = openers[d]
         elif datascrape:
             save_ref(d)
             dt = dict
-            ds = dictpackup(d.__dict__|{"0":typestring(d),"1":id(d)}, depth, **kwargs)
+            ds = f"{id(d)} "+dictpackup(d.__dict__|{"0":typestring(d),"1":id(d)}, depth, **kwargs)
         else: ds = ""
     return prefix(depth, dt)+ds
 
@@ -142,13 +176,19 @@ def packup(d, depth=0, datascrape=False, id_references=None, separator=":", dept
 
 
 
-def unpack(ds, depth=0, separator=":", **kwargs):
+def unpack(ds, depth=0, separator=":", do_id_refs=True, id_refs=None, **kwargs):
+    kwargs["do_id_refs"] = do_id_refs
+    if do_id_refs:
+        if id_refs==None: id_refs = {}
+        kwargs["id_refs"] = id_refs
     def prefix_split(ds):
         i = ds.find(":")
         depth = int(ds[:i])
         return depth, ds[:i+depth+1], ds[i+depth+1:]
     def iterableunpack(ds, **kwargs):
         i = []
+        id_ref, ds = ds.split(" ", 1)
+        if kwargs["do_id_refs"]: kwargs["id_refs"][int(id_ref)] = i
         if ds[0]=="\n":
             depth, prefix, ds = prefix_split(ds)
             if ds:
@@ -161,6 +201,8 @@ def unpack(ds, depth=0, separator=":", **kwargs):
         return i
     def dictunpack(ds, **kwargs):
         d = {}
+        id_ref, ds = ds.split(" ", 1)
+        if kwargs["do_id_refs"]: kwargs["id_refs"][int(id_ref)] = d
         if ds[0]=="\n":
             depth, prefix, ds = prefix_split(ds)
             if ds:
@@ -174,80 +216,37 @@ def unpack(ds, depth=0, separator=":", **kwargs):
                 key, value = ds.split(separator, 1)
                 d[unpack(key, depth, **kwargs)] = unpack(value, depth, **kwargs)
         return d
+    def arrayunpack(ds, **kwargs):
+        id_ref, ds = ds.split(" ", 1)
+        array = bytes2array(bs64dec(bytes.fromhex(ds)))
+        if kwargs["do_id_refs"]: kwargs["id_refs"][int(id_ref)] = array
+        return array
     
-    if ds: #  and len(ds)>dc
+    if ds:
         if depth==0: depth, prefix, ds = prefix_split(ds)
         dt = ds[0]
         if dt==openers[type(None)]: return None
-        elif dt==openers[dict]: return dictunpack(ds[1:])
-        elif dt==openers[list]: return iterableunpack(ds[1:])
-        elif dt==openers[tuple]: return tuple(iterableunpack(ds[1:]))
-        elif dt==openers[set]: return set(iterableunpack(ds[1:]))
+        elif dt==openers[dict]: return dictunpack(ds[1:], **kwargs)
+        elif dt==openers[list]: return iterableunpack(ds[1:], **kwargs)
+        elif dt==openers[tuple]: return tuple(iterableunpack(ds[1:], **kwargs))
+        elif dt==openers[set]: return set(iterableunpack(ds[1:], **kwargs))
         elif dt==openers[int]: return int(ds[1:])
         elif dt==openers[float]: return float(ds[1:])
         elif dt==openers[str]: return ds[1:]
         elif dt==openers[bytes]: return bs64dec(bytes.fromhex(ds[1:]))
         elif dt==openers[bool] and ds[1] in "10": return ds[1]=="1"
         elif dt==openers[type]: return reverse_openers[ds[1]]
-        elif dt==openers[np.ndarray]: return bytes2array(bs64dec(bytes.fromhex(ds[1:])))
-        elif dt=="r": return int(ds[1:])
+        elif dt==openers[np.ndarray]: return arrayunpack(ds[1:], **kwargs)
+        elif dt=="r":
+            id_ref = int(ds[1:])
+            if do_id_refs and id_ref in id_refs: return id_refs[id_ref]
+            return id_ref
         elif dt=="S": return bs64dec(bytes.fromhex(ds[1:])).decode("utf8")
 
 
-def pcksave(path, data, ext="pcksave"):
-    dirs, name, path_ext = explode(path)
-    if not path_ext: path = implode(dirs, name, ext)
-    makedirs(path, exist_ok=True)
-    f = FileIO(path, "w")
-    f.write(bytes(packup(data, datascrape=True), "utf-8"))
-    f.close()
-def pckload(path, ext="pcksave"):
-    dirs, name, path_ext = explode(path)
-    if not path_ext: path = implode(dirs, name, ext)
-    if os.path.isfile(path):
-        f = FileIO(path, "r")
-        data = unpack(str(f.read(), "utf-8"))
-        f.close()
-        return data
-
-class savenload():
-    load_env = __name__
-    def class_load(self, c): return eval(c)
-    
-    def save(self, x, **kwargs): pcksave(x, self, **kwargs)
-    def load(self, x, object_refs=None, **kwargs):
-        if is_str(x): return self.load(pckload(x, **kwargs)) # x==path
-        if type(x)==dict:
-            self.load_before()
-            if object_refs==None: object_refs = {} # old_id: object it self
-            if "0" in x: del x["0"]
-            if "1" in x:
-                object_refs[x["1"]] = self
-                del x["1"]
-            for k,v in x.items():
-                if type(v)==dict and "0" in v:
-                    xx = self.class_load(v['0'].replace(self.load_env+".", ""))() # get class and init
-                    xx.load(v, object_refs)
-                    setattr(self, k, xx)
-                elif is_hashable(v) and v in object_refs: setattr(self, k, object_refs[v])
-                else: setattr(self, k, v)
-            self.load_after()
-            return True
-        return False
-    def load_before(self): pass
-    def load_after(self): pass
-    
-class savenload(savenload):
-    load_env = __name__
-    def class_load(self, c): return eval(c)
 
 
-
-
-
-
-
-def array2bytes(a):
+def array2bytes(a, **kwargs):
     pre = np.array(a.shape).astype(np.uint64).tobytes()+b"0"
     if a.dtype==np.uint8: t = 1
     elif a.dtype==np.uint16: t = 2
@@ -261,11 +260,11 @@ def array2bytes(a):
     elif a.dtype==np.float32: t = 10
     elif a.dtype==np.float64: t = 11
     elif a.dtype==np.bool_: t = 12
-    else: t = 12+int(a.itemsize/4) # str_
+    else: t = 12+int(a.itemsize/4)
     pre = pre+bytes([t])+b"0"
     return pre+a.tobytes()
 
-def bytes2array(b):
+def bytes2array(b, **kwargs):
     shape, t, b = b.split(b"0", 2)
     shape = np.frombuffer(shape, dtype=np.uint64)
     t = t[0]
@@ -286,41 +285,111 @@ def bytes2array(b):
 
 
 
+def pcksave(path, data, ext="pcksave"):
+    dirs, name, path_ext = explode(path)
+    if not path_ext: path = implode(dirs, name, ext)
+    makedirs(path, exist_ok=True)
+    f = FileIO(path, "w")
+    f.write(bytes(packup(data, datascrape=True), "utf-8"))
+    f.close()
+def pckload(path, ext="pcksave", **kwargs):
+    dirs, name, path_ext = explode(path)
+    if not path_ext: path = implode(dirs, name, ext)
+    if os.path.isfile(path):
+        f = FileIO(path, "r")
+        data = unpack(str(f.read(), "utf-8"), **kwargs)
+        f.close()
+        return data
+
+class savenload():
+    load_env = __name__
+    def class_load(self, c): return eval(c)
+    def load_before(self): pass
+    def load_after(self): pass
+    
+    def save(self, x, **kwargs): pcksave(x, self, **kwargs)
+    def load(self, x, object_refs=None, **kwargs):
+        if is_str(x): # x is a path
+            kwargs["do_id_refs"] = False
+            return self.load(pckload(x, **kwargs))
+        if type(x)==dict:
+            self.load_before()
+            if object_refs==None: object_refs = {} # old_id: object it self
+            if "0" in x: del x["0"]
+            if "1" in x:
+                object_refs[x["1"]] = self
+                del x["1"]
+            for k,v in x.items():
+                if type(v)==dict and "0" in v:
+                    xx = self.class_load(v['0'].replace(self.load_env+".", ""))() # get class and init
+                    xx.load(v, object_refs)
+                    setattr(self, k, xx)
+                elif is_hashable(v) and v in object_refs: setattr(self, k, object_refs[v])
+                else: setattr(self, k, v)
+            self.load_after()
+            return True
+        return False
+    
+class savenload(savenload): # define after importing
+    load_env = __name__
+    def class_load(self, c): return eval(c)
+    def load_before(self): pass
+    def load_after(self): pass
+
+
+
+
+
 
 
 if __name__ == "__main__":
-##    class asd(savenload): # example
-##        def __init__(self):
-##            pass
-##    x = asd()
-##    y = asd()
-##    x.num = 5
-##    x.dict = {}
-##    x.list = [] # x,x.dict
-##    x.asd = y
-##    x.asd.x = x
-##    
-##    x.save("x")
-##    print(x, x.asd, x.asd.x)
-##    
-##    x = asd()
-##    x.load("x")
-##    print(x.__dict__)
-##    print(x, x.asd, x.asd.x)
-
-
-##    x = asd()
-##    d = {
-##        "INT":3,
-##        "LIST":list(range(5)),
-##        "SET":set(range(5)),
-##        "emptylist": [x],
-##        "a:sd": np.random.rand(5),
-##        "x": x,
-##        }
-##    d["d"] = d
-##    d_ = packup(d)
-##    print(d_)
-##    d = unpack(d_)
-##    print(d)
+##    if 1:
+##        print("test1")
+##        path = "test1"
+##        d = {}
+##        l = [d]
+##        a = np.random.rand(3)
+##        d["a"] = a
+##        l.append(a)
+##        d["b"] = l
+##        pcksave(path, d)
+##
+##        d = pckload(path)
+##        d["a"] += 1
+##        print(d)
+##    if 1:
+##        print("test2")
+##        class asd(savenload): # example
+##            def __init__(self):
+##                pass
+##        x = asd()
+##        y = asd()
+##        x.num = 5
+##        x.dict = {}
+##        x.list = [] # x,x.dict
+##        x.asd = y
+##        x.asd.x = x
+##        
+##        x.save("test2")
+##        print(x, x.asd, x.asd.x)
+##        
+##        x = asd()
+##        x.load("test2")
+##        print(x, x.asd, x.asd.x)
+##    if 1:
+##        print("test3")
+##        x = asd()
+##        d = {
+##            "INT":3,
+##            "LIST":list(range(5)),
+##            "SET":set(range(5)),
+##            "emptylist": [x],
+##            "a:sd": np.random.rand(5),
+##            "x": x,
+##            }
+##        d["d"] = d
+##        d_ = packup(d)
+##        print(d_)
+##        d = unpack(d_)
+##        print(d)
     pass
