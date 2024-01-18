@@ -47,12 +47,8 @@ def makedirs(path, **kwargs):
 
 def is_array(x): return type(x)==np.ndarray
 def is_str(x): return type(x) in [str,np.str_] or (is_array(x) and is_str(getattr(np, str(x.dtype))(1)))
-def is_float(x): return type(x)==float or isinstance(x, np.floating) or (is_array(x) and is_float(getattr(np, str(x.dtype))(1)))
-def is_integer(x): return type(x)==int or isinstance(x, np.integer) or (is_array(x) and is_integer(getattr(np, str(x.dtype))(1)))
 def is_iterable(x): return type(x) in [tuple,set,list,np.ndarray]
 def is_mutable(x): return type(x) in [list,np.ndarray,dict]
-def is_function(x): return isinstance(x, types.FunctionType)
-def is_callable(x): return is_function(x) or hasattr(x, "__call__")
 def is_hashable(x): return not is_mutable(x)
 
 
@@ -292,11 +288,10 @@ def bytes2array(b):
 
 
 
-##class asd(savenload): # example
-##    def __init__(self):
-##        pass
 if __name__ == "__main__":
-    
+##    class asd(savenload): # example
+##        def __init__(self):
+##            pass
 ##    x = asd()
 ##    y = asd()
 ##    x.num = 5
