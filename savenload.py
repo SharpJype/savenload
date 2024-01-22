@@ -145,7 +145,7 @@ def packup(d, depth=0, datascrape=False, id_refs=None, separator=":", depth_ceil
         dt = "r"
         ds = str(id(d))
     else:
-        kwargs = {"datascrape":datascrape, "id_refs":id_refs, "separator":":", "depth_ceiling":depth_ceiling}
+        kwargs = {"datascrape":datascrape, "id_refs":id_refs, "separator":separator, "depth_ceiling":depth_ceiling}
         if dt==dict:
             save_ref(d)
             ds = f"{id(d)} "+dictpackup(d, depth, **kwargs)
@@ -168,7 +168,7 @@ def packup(d, depth=0, datascrape=False, id_refs=None, separator=":", depth_ceil
         elif datascrape:
             save_ref(d)
             dt = dict
-            ds = f"{id(d)} "+dictpackup(d.__dict__|{"0":typestring(d),"1":id(d)}, depth, **kwargs)
+            ds = f"{id(d)} "+dictpackup(d.__dict__|{0:typestring(d),1:id(d)}, depth, **kwargs)
         else: ds = ""
     return prefix(depth, dt)+ds
 
@@ -315,13 +315,13 @@ class savenload():
         if type(x)==dict:
             self.load_before()
             if object_refs==None: object_refs = {} # old_id: object it self
-            if "0" in x: del x["0"]
-            if "1" in x:
-                object_refs[x["1"]] = self
-                del x["1"]
+            if 0 in x: del x[0]
+            if 1 in x:
+                object_refs[x[1]] = self
+                del x[1]
             for k,v in x.items():
-                if type(v)==dict and "0" in v:
-                    xx = self.class_load(v['0'].replace(self.load_env+".", ""))() # get class and init
+                if type(v)==dict and 0 in v:
+                    xx = self.class_load(v[0].replace(self.load_env+".", ""))() # get class and init
                     xx.load(v, object_refs)
                     setattr(self, k, xx)
                 elif is_hashable(v) and v in object_refs: setattr(self, k, object_refs[v])
