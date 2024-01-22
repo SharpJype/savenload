@@ -135,7 +135,7 @@ def packup(d, depth=0, datascrape=False, id_refs=None, separator=":", depth_ceil
         if len(d):
             depth += 1
             sep = "\n"+str(depth)+":"+" "*depth
-            return sep+sep.join([packup(k, depth)+separator+packup(v, depth, **kwargs) for k,v in d.items()])
+            return sep+sep.join([packup(k, depth, **kwargs)+separator+packup(v, depth, **kwargs) for k,v in d.items()])
         return "<empty>"
     dt = type(d)
     if depth==depth_ceiling:
