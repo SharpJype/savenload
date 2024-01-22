@@ -124,7 +124,10 @@ def packup(d, depth=0, datascrape=False, id_refs=None, separator=":", depth_ceil
         x = openers.get(t, t)
         return x if depth else "0:"+x # str(depth).zfill(dc)+openers.get(t, t)
     def save_ref(x): id_refs.append(id(x)) # save a reference
-    def typestring(o): return str(type(o))[8:-2]
+    def typestring(o):
+        string = str(type(o))[8:-2]
+        string = string.replace("__main__.", "").replace("__mp_main__.", "")
+        return string
     def iterablepackup(i, depth, **kwargs):
         if len(i):
             depth += 1
@@ -302,7 +305,6 @@ def pckload(path, ext="pcksave", **kwargs):
         return data
 
 class savenload():
-    load_env = __name__
     def class_load(self, c): return eval(c)
     def load_before(self): pass
     def load_after(self): pass
@@ -321,8 +323,8 @@ class savenload():
                 del x[1]
             for k,v in x.items():
                 if type(v)==dict and 0 in v:
-                    xx = self.class_load(v[0].replace(self.load_env+".", ""))() # get class and init
-                    xx.load(v, object_refs)
+                    xx = self.class_load(v[0])() # get class and initialize
+                    if hasattr(xx, "load"): xx.load(v, object_refs)
                     setattr(self, k, xx)
                 elif is_hashable(v) and v in object_refs: setattr(self, k, object_refs[v])
                 else: setattr(self, k, v)
@@ -331,7 +333,6 @@ class savenload():
         return False
     
 class savenload(savenload): # define after importing
-    load_env = __name__
     def class_load(self, c): return eval(c)
     def load_before(self): pass
     def load_after(self): pass
