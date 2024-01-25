@@ -348,7 +348,7 @@ class savenload():
         return False
     
 class savenload(savenload): # define after importing
-    def class_load(self, c): return eval(c)
+    def class_load(self, c): return eval(c.replace(__name__+".", ""))
     def load_before(self): pass
     def load_after(self): pass
 
