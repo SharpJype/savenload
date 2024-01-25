@@ -118,7 +118,7 @@ def datascrape(obj):
     try: return {k:datascrape(v) for k,v in obj.__dict__.items()}
     except: return None
 
-def packup(d, depth=0, datascrape=False, id_refs=None, separator=":", depth_ceiling=None, **kwargs):
+def packup(d, depth=0, datascrape=False, id_refs=None, separator=":", depth_ceiling=None, do_not_save=None, **kwargs):
     if id_refs==None: id_refs = []
     def prefix(depth, t):
         x = openers.get(t, t)
@@ -141,8 +141,8 @@ def packup(d, depth=0, datascrape=False, id_refs=None, separator=":", depth_ceil
             return sep+sep.join([packup(k, depth, **kwargs)+separator+packup(v, depth, **kwargs) for k,v in d.items()])
         return "<empty>"
     dt = type(d)
-    if depth==depth_ceiling:
-        dt = None
+    if (do_not_save and do_not_save.exists(d)) or depth==depth_ceiling:
+        dt = "." # ignore when unpacking
         ds = ""
     elif id(d) in id_refs:
         dt = "r"
@@ -170,9 +170,12 @@ def packup(d, depth=0, datascrape=False, id_refs=None, separator=":", depth_ceil
         elif dt==type: ds = openers[d]
         elif datascrape:
             save_ref(d)
+            if hasattr(d, "do_not_save"): kwargs["do_not_save"] = d.do_not_save
             dt = dict
             ds = f"{id(d)} "+dictpackup(d.__dict__|{0:typestring(d),1:id(d)}, depth, **kwargs)
-        else: ds = ""
+        else:
+            dt = None
+            ds = ""
     return prefix(depth, dt)+ds
 
 
@@ -197,7 +200,8 @@ def unpack(ds, depth=0, separator=":", do_id_refs=True, id_refs=None, **kwargs):
             if ds:
                 index = ds.find(prefix)
                 while index > 0:
-                    i.append(unpack(ds[:index], depth, **kwargs))
+                    if ds[:index][0]!=".":
+                        i.append(unpack(ds[:index], depth, **kwargs))
                     ds = ds[index+len(prefix):]
                     index = ds.find(prefix)
                 i.append(unpack(ds, depth, **kwargs))
@@ -214,7 +218,8 @@ def unpack(ds, depth=0, separator=":", do_id_refs=True, id_refs=None, **kwargs):
                     try: key, value = ds[:index].split(separator, 1)
                     except: print(ds[:index])
                     ds = ds[index+len(prefix):]
-                    d[unpack(key, depth, **kwargs)] = unpack(value, depth, **kwargs)
+                    if value[0]!=".":
+                        d[unpack(key, depth, **kwargs)] = unpack(value, depth, **kwargs)
                     index = ds.find(prefix)
                 key, value = ds.split(separator, 1)
                 d[unpack(key, depth, **kwargs)] = unpack(value, depth, **kwargs)
@@ -304,12 +309,22 @@ def pckload(path, ext="pcksave", **kwargs):
         f.close()
         return data
 
+class savenload_do_not_save:
+    def __init__(self):
+        self.idlist = []
+        self.attrlist = []
+    def id(self, x): self.idlist.append(id(x))
+    def clear(self):
+        self.idlist.clear()
+        self.attrlist.clear()
+    def exists(self, x): return id(x) in self.idlist
 class savenload():
+    do_not_save = savenload_do_not_save()
     def class_load(self, c): return eval(c)
     def load_before(self): pass
     def load_after(self): pass
-    
-    def save(self, x, **kwargs): pcksave(x, self, **kwargs)
+
+    def save(self, x, *args, **kwargs): pcksave(x, self, **kwargs)
     def load(self, x, object_refs=None, **kwargs):
         if is_str(x): # x is a path
             kwargs["do_id_refs"] = False
