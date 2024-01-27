@@ -241,7 +241,9 @@ def unpack(ds, depth=0, separator=":", do_id_refs=True, id_refs=None, **kwargs):
         elif dt==openers[int]: return int(ds[1:])
         elif dt==openers[float]: return float(ds[1:])
         elif dt==openers[str]: return ds[1:]
-        elif dt==openers[bytes]: return bs64dec(bytes.fromhex(ds[1:]))
+        elif dt==openers[bytes]:
+            id_ref, ds = ds[1:].split(" ", 1)
+            return bs64dec(bytes.fromhex(ds))
         elif dt==openers[bool] and ds[1] in "10": return ds[1]=="1"
         elif dt==openers[type]: return reverse_openers[ds[1]]
         elif dt==openers[np.ndarray]: return arrayunpack(ds[1:], **kwargs)
