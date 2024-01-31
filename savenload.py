@@ -4,7 +4,9 @@ import types
 from io import FileIO
 from base64 import encodebytes as bs64enc
 from base64 import decodebytes as bs64dec
+import __main__
 
+def basename(path): return os.path.basename(path).rsplit(".",1)[0]
 # usage for basic python datatypes and numpy arrays:
 #   to/from string:
 #       packup(obj) -> string
@@ -125,8 +127,9 @@ def packup(d, depth=0, datascrape=False, id_refs=None, separator=":", depth_ceil
         return x if depth else "0:"+x # str(depth).zfill(dc)+openers.get(t, t)
     def save_ref(x): id_refs.append(id(x)) # save a reference
     def typestring(o):
+        name = basename(__main__.__file__)
         string = str(type(o))[8:-2]
-        string = string.replace("__main__.", "").replace("__mp_main__.", "")
+        string = string.replace("__main__.", name+".").replace("__mp_main__.", name+".")
         return string
     def iterablepackup(i, depth, **kwargs):
         if len(i):
@@ -311,23 +314,28 @@ def pckload(path, ext="pcksave", **kwargs):
         f.close()
         return data
 
+
 class savenload_do_not_save:
-    def __init__(self):
-        self.idlist = []
-        self.attrlist = []
+    def __init__(self): self.idlist = []
     def id(self, x): self.idlist.append(id(x))
-    def clear(self):
-        self.idlist.clear()
-        self.attrlist.clear()
+    def clear(self): self.idlist.clear()
     def exists(self, x): return id(x) in self.idlist
 class savenload():
+    locals_ = locals()
+    globals_ = globals()
+    __file__ = __file__
     do_not_save = savenload_do_not_save()
-    def class_load(self, c): return eval(c)
     def load_before(self): pass
     def load_after(self): pass
-
+    def eval(self, x): return eval(x)
     def save(self, x, *args, **kwargs): pcksave(x, self, **kwargs)
     def load(self, x, object_refs=None, **kwargs):
+        def class_load(string):
+            name = basename(self.__file__) # loading enviroment
+            path = string.split(".")
+            if path[0]==name: path = path[1:]
+            string = ".".join(path)
+            return eval(string, self.globals_, self.locals_)
         if is_str(x): # x is a path
             kwargs["do_id_refs"] = False
             return self.load(pckload(x, **kwargs))
@@ -340,7 +348,7 @@ class savenload():
                 del x[1]
             for k,v in x.items():
                 if type(v)==dict and 0 in v:
-                    xx = self.class_load(v[0])() # get class and initialize
+                    xx = class_load(v[0])() # get class from __main__ and initialize
                     if hasattr(xx, "load"): xx.load(v, object_refs)
                     setattr(self, k, xx)
                 elif is_hashable(v) and v in object_refs: setattr(self, k, object_refs[v])
@@ -348,16 +356,11 @@ class savenload():
             self.load_after()
             return True
         return False
-    
-class savenload(savenload): # define after importing
-    def class_load(self, c): return eval(c.replace(__name__+".", ""))
-    def load_before(self): pass
-    def load_after(self): pass
 
-
-
-
-
+class savenload(savenload):
+    locals_ = locals()
+    globals_ = globals()
+    __file__ = __file__
 
 
 if __name__ == "__main__":
