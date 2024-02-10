@@ -7,6 +7,9 @@ from base64 import decodebytes as bs64dec
 import __main__
 
 def basename(path): return os.path.basename(path).rsplit(".",1)[0]
+
+# LIKE PICKLE BUT WORSE
+
 # usage for basic python datatypes and numpy arrays:
 #   to/from string:
 #       packup(obj) -> string
@@ -25,27 +28,27 @@ def basename(path): return os.path.basename(path).rsplit(".",1)[0]
 #       pckload(path)
 
 
-# usage of savenload class:
+# usage of SaveNLoad class:
 #   EXAMPLE:
 #       import savenload
+#       class SaveNLoad(savenload.SaveNLoad):
+#            locals_ = locals()
+#            globals_ = globals()
+#            __file__ = __file__
 #
-#       class savenload(savenload.savenload):
-#           load_env = __name__
-#           def class_load(self, c): return eval(c)
-#
-#       class myclass(savenload.savenload):
+#       class MyClass(SaveNLoad):
 #           pass
 #
 #   also if a child object is a reference to another object, the reference remade when unpacking/loading
 #   
 #   loading breaks when there is a custom class inside basic python objects -> classes stay as dictionaries
-#       myclass -> dict/list/tuple/... -> anotherclass
+#       MyClass -> dict/list/tuple/... -> anotherclass
 #
 #   instead keep class structure continuous:
-#       myclass -> anotherclass -> anotheranotherclass -> ...
+#       MyClass -> anotherclass -> anotheranotherclass -> ...
 #   
 #   to/from files:
-#       x = myclass()
+#       x = MyClass()
 #       x.save(path)
 #       x.load(path)
 
@@ -111,7 +114,6 @@ reverse_openers = reverse_dict(openers)
 
 
 
-
 def datascrape(obj):
     if type(obj) in openers:
         if is_iterable(obj): return [datascrape(x) for x in obj]
@@ -120,7 +122,7 @@ def datascrape(obj):
     try: return {k:datascrape(v) for k,v in obj.__dict__.items()}
     except: return None
 
-def packup(d, depth=0, datascrape=False, id_refs=None, separator=":", depth_ceiling=None, do_not_save=None, **kwargs):
+def packup(d, depth=0, datascrape=False, id_refs=None, separator=":", depth_ceiling=None, do_not_save=None, save_refs=True, **kwargs):
     if id_refs==None: id_refs = []
     def prefix(depth, t):
         x = openers.get(t, t)
@@ -144,41 +146,56 @@ def packup(d, depth=0, datascrape=False, id_refs=None, separator=":", depth_ceil
             return sep+sep.join([packup(k, depth, **kwargs)+separator+packup(v, depth, **kwargs) for k,v in d.items()])
         return "<empty>"
     dt = type(d)
+    di = id(d)
     if (do_not_save and do_not_save.exists(d)) or depth==depth_ceiling:
         dt = "." # ignore when unpacking
         ds = ""
-    elif id(d) in id_refs:
+    elif save_refs and di in id_refs:
         dt = "r"
-        ds = str(id(d))
+        ds = str(di)
     else:
-        kwargs = {"datascrape":datascrape, "id_refs":id_refs, "separator":separator, "depth_ceiling":depth_ceiling}
+        kwargs = {"datascrape":datascrape, "id_refs":id_refs, "separator":separator, "depth_ceiling":depth_ceiling, "save_refs":save_refs}
+        ds = ""
         if dt==dict:
-            save_ref(d)
-            ds = f"{id(d)} "+dictpackup(d, depth, **kwargs)
+            if save_refs:
+                save_ref(d)
+                ds += f"{di} "
+            else: ds += f"0 "
+            ds += dictpackup(d, depth, **kwargs)
         elif is_array(d):
-            save_ref(d)
-            ds = f"{id(d)} "+str(bs64enc(array2bytes(d)).hex())
+            if save_refs:
+                save_ref(d)
+                ds += f"{di} "
+            else: ds += f"0 "
+            ds += str(bs64enc(array2bytes(d)).hex())
         elif is_iterable(d):
-            save_ref(d)
-            ds = f"{id(d)} "+iterablepackup(d, depth, **kwargs)
+            if save_refs:
+                save_ref(d)
+                ds += f"{di} "
+            else: ds += f"0 "
+            ds += iterablepackup(d, depth, **kwargs)
         elif openers.get(dt, "n") in "fis":
             ds = str(d)
             if separator in ds: # encode and give special type
                 dt = "S"
                 ds = str(bs64enc(ds.encode("utf8")).hex())
         elif dt==bytes:
-            save_ref(d)
-            ds = f"{id(d)} "+str(bs64enc(d).hex())
+            if save_refs:
+                save_ref(d)
+                ds += f"{di} "
+            else: ds += f"0 "
+            ds += str(bs64enc(d).hex())
         elif dt==bool: ds = "1" if d else "0"
         elif dt==type: ds = openers[d]
-        elif datascrape:
-            save_ref(d)
+        elif datascrape and d!=None:
+            if save_refs:
+                save_ref(d)
+                ds += f"{di} "
+            else: ds += f"0 "
             if hasattr(d, "do_not_save"): kwargs["do_not_save"] = d.do_not_save
             dt = dict
-            ds = f"{id(d)} "+dictpackup(d.__dict__|{0:typestring(d),1:id(d)}, depth, **kwargs)
-        else:
-            dt = None
-            ds = ""
+            ds += dictpackup(d.__dict__|{0:typestring(d),1:di if save_refs else 0}, depth, **kwargs)
+        else: dt = None
     return prefix(depth, dt)+ds
 
 
@@ -252,7 +269,7 @@ def unpack(ds, depth=0, separator=":", do_id_refs=True, id_refs=None, **kwargs):
         elif dt==openers[np.ndarray]: return arrayunpack(ds[1:], **kwargs)
         elif dt=="r":
             id_ref = int(ds[1:])
-            if do_id_refs and id_ref in id_refs: return id_refs[id_ref]
+            if do_id_refs and id_ref!=0 and id_ref in id_refs: return id_refs[id_ref]
             return id_ref
         elif dt=="S": return bs64dec(bytes.fromhex(ds[1:])).decode("utf8")
 
@@ -298,12 +315,12 @@ def bytes2array(b, **kwargs):
 
 
 
-def pcksave(path, data, ext="pcksave"):
+def pcksave(path, data, ext="pcksave", datascrape=True, **kwargs):
     dirs, name, path_ext = explode(path)
     if not path_ext: path = implode(dirs, name, ext)
     makedirs(path, exist_ok=True)
     f = FileIO(path, "w")
-    f.write(bytes(packup(data, datascrape=True), "utf-8"))
+    f.write(bytes(packup(data, datascrape=datascrape, **kwargs), "utf-8"))
     f.close()
 def pckload(path, ext="pcksave", **kwargs):
     dirs, name, path_ext = explode(path)
@@ -315,16 +332,16 @@ def pckload(path, ext="pcksave", **kwargs):
         return data
 
 
-class savenload_do_not_save:
+class _SaveNLoad_Do_Not_Save:
     def __init__(self): self.idlist = []
     def id(self, x): self.idlist.append(id(x))
     def clear(self): self.idlist.clear()
     def exists(self, x): return id(x) in self.idlist
-class savenload():
+class SaveNLoad():
     locals_ = locals()
     globals_ = globals()
     __file__ = __file__
-    do_not_save = savenload_do_not_save()
+    do_not_save = _SaveNLoad_Do_Not_Save()
     def load_before(self): pass
     def load_after(self): pass
     def eval(self, x): return eval(x)
@@ -357,7 +374,7 @@ class savenload():
             return True
         return False
 
-class savenload(savenload):
+class SaveNLoad(SaveNLoad):
     locals_ = locals()
     globals_ = globals()
     __file__ = __file__
